@@ -5641,6 +5641,84 @@ func TestInit_cloud_to_stateStore(t *testing.T) {
 	}
 }
 
+func TestInit_stateStoreReconfigure(t *testing.T) {
+	// TODO
+
+	// Create a temporary working directory and copy in test fixtures
+	td := t.TempDir()
+	testCopyDir(t, testFixturePath("init-state-store"), td)
+	t.Chdir(td)
+
+	providerSource, close := newMockProviderSource(t, map[string][]string{
+		"hashicorp/test": {"1.2.3"},
+	})
+	defer close()
+
+	ui := new(cli.MockUi)
+	view, done := testView(t)
+	c := &InitCommand{
+		Meta: Meta{
+			// TODO
+			testingOverrides: metaOverridesForProvider(testProvider()),
+			ProviderSource:   providerSource,
+			Ui:               ui,
+			View:             view,
+		},
+	}
+
+	// create some state, so the state store has something to migrate.
+	f, err := os.Create("foo") // this is the path" in the state store config
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	err = writeStateForTesting(testState(), f)
+	f.Close()
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	args := []string{}
+	if code := c.Run(args); code != 0 {
+		t.Fatalf("bad: \n%s", done(t).Stderr())
+	}
+
+	// now run init again, changing the path.
+	// The -reconfigure flag prevents init from migrating
+	// Without -reconfigure, the test fails since the state store asks for input on migrating state
+	args = []string{"-reconfigure", "-backend-config", "path=changed"}
+	if code := c.Run(args); code != 0 {
+		t.Fatalf("bad: \n%s", done(t).Stderr())
+	}
+}
+
+func TestInit_stateStoreConfigFileChange(t *testing.T) {
+	// Create a temporary working directory and copy in test fixtures
+	td := t.TempDir()
+	testCopyDir(t, testFixturePath("init-state-store-config-file-change"), td)
+	t.Chdir(td)
+
+	ui := new(cli.MockUi)
+	view, done := testView(t)
+	c := &InitCommand{
+		Meta: Meta{
+			testingOverrides: metaOverridesForProvider(testProvider()),
+			Ui:               ui,
+			View:             view,
+		},
+	}
+
+	args := []string{"-backend-config", "input.config", "-migrate-state"}
+	if code := c.Run(args); code != 0 {
+		t.Fatalf("bad: \n%s", done(t).Stderr())
+	}
+
+	// Read our saved stateStore config and verify we have our settings
+	state := testDataStateRead(t, filepath.Join(DefaultDataDir, DefaultStateFilename))
+	if got, want := normalizeJSON(t, state.StateStore.ConfigRaw), `{"path":"hello","workspace_dir":null}`; got != want {
+		t.Errorf("wrong config\ngot:  %s\nwant: %s", got, want)
+	}
+}
+
 // newMockProviderSource is a helper to succinctly construct a mock provider
 // source that contains a set of packages matching the given provider versions
 // that are available for installation (from temporary local files).
